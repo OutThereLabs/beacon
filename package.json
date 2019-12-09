@@ -1,0 +1,9 @@
+{
+  "name": "beacon",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "boomcatch": "^3.2.5"
+  }
+}

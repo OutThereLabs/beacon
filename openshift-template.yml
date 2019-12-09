@@ -1,0 +1,127 @@
+kind: Template
+apiVersion: v1
+labels:
+  app: ${NAME}
+objects:
+- apiVersion: image.openshift.io/v1
+  kind: ImageStream
+  metadata:
+    name: ${NAME}
+- apiVersion: build.openshift.io/v1
+  kind: BuildConfig
+  metadata:
+    name: ${NAME}
+  spec:
+    output:
+      to:
+        kind: ImageStreamTag
+        name: ${NAME}:latest
+    source:
+      git:
+        ref: master
+        uri: https://github.com/OutThereLabs/beacon.git
+      type: Git
+    strategy:
+      sourceStrategy:
+        from:
+          kind: ImageStreamTag
+          name: nodejs:10
+          namespace: openshift
+      type: Source
+    triggers:
+      - type: ConfigChange
+      - imageChange: {}
+        type: ImageChange
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: statsd-exporter
+  data:
+    statsd_mapping.yml: |-
+      mappings:
+        - match: "rt.*"
+          timer_type: histogram
+          buckets: [ 0.01, 0.025, 0.05, 0.1 ]
+          name: "rt"
+          labels:
+            param: "${1}"
+        - match: "navtiming.*"
+          timer_type: histogram
+          buckets: [ 0.01, 0.025, 0.05, 0.1 ]
+          name: "navtiming"
+          labels:
+            param: "${1}"
+- apiVersion: apps.openshift.io/v1
+  kind: DeploymentConfig
+  metadata:
+    name: ${NAME}
+  spec:
+    replicas: 1
+    selector:
+      app: ${NAME}
+      deploymentconfig: ${NAME}
+    strategy:
+      resources: {}
+    template:
+      metadata:
+        labels:
+          app: ${NAME}
+          deploymentconfig: ${NAME}
+        annotations:
+          prometheus.io/scrape: 'true'
+          prometheus.io/port: '9102'
+      spec:
+        containers:
+          - image: ${NAME}:latest
+            name: beacon
+            ports:
+              - containerPort: 8080
+                protocol: TCP
+            resources: {}
+          - image: prom/statsd-exporter
+            name: statsd-exporter
+            command: ['/bin/statsd_exporter', '--statsd.mapping-config=/etc/statsd_exporter/statsd_mapping.yml', '--log.level=debug']
+            ports:
+              - containerPort: 9102
+                name: http
+                protocol: TCP
+              - containerPort: 9125
+                name: statsd-tcp
+                protocol: TCP
+              - containerPort: 9125
+                name: statsd-udp
+                protocol: UDP
+            volumeMounts:
+              - name:  statsd-exporter
+                mountPath:  /etc/statsd_exporter
+            resources: {}
+        volumes:
+          - name:  statsd-exporter
+            configMap:
+              name: statsd-exporter
+    triggers:
+      - type: ConfigChange
+      - imageChangeParams:
+          automatic: true
+          containerNames:
+            - ${NAME}
+          from:
+            kind: ImageStreamTag
+            name: ${NAME}:latest
+        type: ImageChange
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: beacon
+  spec:
+    ports:
+      - name: http
+        port: 8080
+        protocol: TCP
+        targetPort: 8080
+    selector:
+      app: beacon
+      deploymentconfig: beacon
+parameters:
+  - name: NAME
+    value: beacon
